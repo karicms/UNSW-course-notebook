@@ -1,0 +1,9 @@
+# Course slides and other source teaching materials are kept locally only.
+# Markdown notes under note/ are intentionally tracked.
+/ppt/
+*.pdf
+*.ppt
+*.pptx
+
+# OS metadata
+.DS_Store
