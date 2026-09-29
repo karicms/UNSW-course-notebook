@@ -187,13 +187,13 @@ Internet protocol stack 是 Internet 使用的五层分层模型：Application�
 
 ### 解释
 
-| 层 | 课件职责 | 典型协议/对象 |
-| --- | --- | --- |
-| Application | supporting network applications | HTTP、SMTP、FTP |
-| Transport | process-to-process data transfer | TCP、UDP；segment |
-| Network | source-to-destination datagram routing | IP；datagram |
-| Link | data transfer between neighboring network elements | Ethernet、Wi-Fi；frame |
-| Physical | bits “on the wire” | copper、fiber、radio；bits |
+| 层           | 课件职责                                               | 典型协议/对象                 |
+| ----------- | -------------------------------------------------- | ----------------------- |
+| Application | supporting network applications                    | HTTP、SMTP、FTP           |
+| Transport   | process-to-process data transfer                   | TCP、UDP；segment         |
+| Network     | source-to-destination datagram routing             | IP；datagram             |
+| Link        | data transfer between neighboring network elements | Ethernet、Wi-Fi；frame    |
+| Physical    | bits “on the wire”                                 | copper、fiber、radio；bits |
 
 ### 例子
 
@@ -509,7 +509,6 @@ request line 是 `method SP URL SP version CRLF`，常见 request messages 用 A
 ```http
 GET /index.html HTTP/1.1
 Host: example.com
-
 ```
 
 ## HTTP response、status line 与 status codes

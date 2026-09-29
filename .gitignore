@@ -1,5 +1,6 @@
 # Course slides and other source teaching materials are kept locally only.
 # Markdown notes under note/ are intentionally tracked.
+/ignore/
 /ppt/
 *.pdf
 *.ppt
