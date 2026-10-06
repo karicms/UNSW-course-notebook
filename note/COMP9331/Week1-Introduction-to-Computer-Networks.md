@@ -438,7 +438,7 @@ TLS（Transport Layer Security）是 application layer 实现的安全库/协议
 
 ### 解释
 
-Vanilla TCP 和 UDP sockets 没有 encryption；cleartext password 放入普通 socket 会以明文穿越 Internet。TLS 可提供 encryption、data integrity 与 end-point authentication（课件称 TLS socket API 是 TCP socket API 的 enhancement）。
+Vanilla TCP 和 UDP sockets 本身不提供 encryption；把 cleartext password 写入普通 socket，会以明文穿越 Internet。TLS 可提供 encrypted TCP connections、data integrity 与 end-point authentication（课件称 TLS socket API 是 TCP socket API 的 enhancement）。在本课程的分层模型中，TLS 由 application layer 的 library/协议实现，并在其下使用 TCP：application 写入 TLS socket 的是 cleartext，TLS 加密后在 Internet 上传输的是 encrypted data。
 
 ### 例子
 
@@ -474,11 +474,11 @@ protocol://host-name[:port]/directory-path/resource
 
 ### 解释
 
-`protocol` 可为 `http`、`https`、`ftp`、`smtp` 等；hostname 可是 DNS name 或 IP address；port 未写时使用协议 standard port，例如 HTTP `80`、HTTPS `443`。
+`protocol` 可为 `http`、`https`、`ftp`、`smtp` 等；hostname 可是 DNS name 或 IP address；port 未写时使用协议 standard port，例如 HTTP `80`、HTTPS `443`。`directory-path` 是层级路径，例如 `/news/2026/`；传统 Web 中它常反映 server 的文件系统目录，但现代 Web 的 route 不一定对应真实目录。`resource` 才是该 URL 要定位/操作的目标资源，例如 `a.html`；两者合起来形成 URL path。
 
 ### 例子
 
-`https://www.example.com:443/news/a.html` 指定 HTTPS、host、显式 port 与 resource path。
+`https://www.example.com:443/news/a.html` 指定 HTTPS、host、显式 port；其中 `/news/` 是 directory path，`a.html` 是 resource。`https://example.com/users/42` 中的 `/users/42` 也可能只是 application route，而不是服务器上真实存在的 `/users/42` 目录。
 
 ## HTTP 的 client-server、TCP 与 stateless 特性
 
@@ -488,7 +488,7 @@ HTTP（HyperText Transfer Protocol）是 Web 的 application-layer protocol，�
 
 ### 解释
 
-client 对 server port `80` 建立 TCP connection/socket；server accept connection 后交换 HTTP messages。Stateless 指 server 不维护关于过去 client requests 的信息，故多步交互的 state 需另行处理。
+client 对 server port `80` 建立 TCP connection/socket；server accept connection 后交换 HTTP messages。Stateless 指 HTTP 本身没有靠多条 HTTP messages 完成一次 Web “transaction” 的 multi-step exchange state：各 HTTP requests 相互独立，client/server 不需要在协议层追踪它进行到哪一步，也无需对一个部分完成但最终未完成的 transaction 做协议级恢复。若 application 需要跨请求记住登录、购物车等 state，必须另行处理，例如使用 cookies。
 
 ### 例子
 
@@ -502,7 +502,7 @@ HTTP request 是 client-to-server message；general format 由 request line、�
 
 ### 解释
 
-request line 是 `method SP URL SP version CRLF`，常见 request messages 用 ASCII、以 `CRLF` 分行。`GET` 取回 object；`POST` 将 form input 放在 entity body；`HEAD` 只请求若以 GET 请求会返回的 headers；`PUT` 将 entity body 中 object 上传至 URL 指定路径。
+request line 是 `method SP URL SP version CRLF`，常见 request messages 用 ASCII、以 `CRLF` 分行。`GET` 取回 object，传给 server 的参数通常写在 URL 的 `?query` 中；`POST` 通常把 form input/data 放在 entity body；`HEAD` 只请求若以 GET 请求会返回的 headers，不取回 body；`PUT` 的 HTTP 语义是用 entity body 完整替换指定 URL 的 resource。要区分 HTTP method 的语义与 Spring Boot 等框架的实现：框架只按 method 映射 handler，业务代码可以让 `PUT` 做部分修改；但按 HTTP 语义，部分更新通常对应 `PATCH`。
 
 ### 例子
 
@@ -538,7 +538,7 @@ Content-Type: text/html
 
 ### 解释
 
-这使 messages 较易 delineate、相对 human-readable，也避免字段编码/格式化的一些复杂性；同时 HTTP 可传输 variable-length data，body 可承载非文本 object。
+这使 messages 较易 delineate、相对 human-readable，也避免字段编码/格式化的一些复杂性；同时 HTTP 可传输 variable-length data，body 可承载非文本 object。不同 header fields 通常没有顺序依赖，因此可按任意顺序出现；但 message 的整体结构有固定顺序：request line（或 response status line）→ headers → blank line → optional body，不能把 body 或空行随意放到 headers 前面。
 
 ### 例子
 
@@ -548,11 +548,11 @@ request header 的 `Host: example.com\r\n` 以 CRLF 结束；header 与 entity b
 
 ### 定义
 
-Cookie 是 Web site 与 browser 用来在多次 stateless HTTP transactions 间维护 state 的机制。
+Cookie 是 Web site 与 browser 用来在多次 stateless HTTP transactions 间维护 state 的机制。这正是在 HTTP stateless 后出现 “How to keep state?” 这个 challenge 的原因：HTTP 协议不记住先前 request，但 Web application 仍需要跨多个 requests 识别用户并保存状态。
 
 ### 解释
 
-课件列出四组件：HTTP response 中的 `Set-cookie` header、后续 HTTP request 中的 `Cookie` header、用户 host 的 cookie file（browser 管理）、Web site 的 back-end database。server 创建 ID，browser 保存并在后续请求带回。
+课件列出四组件：HTTP response 中的 `Set-cookie` header、后续 HTTP request 中的 `Cookie` header、用户 host 的 cookie file（browser 管理）、Web site 的 back-end database。server 创建 ID，browser 保存并在后续请求带回；HTTP messages 因而可携带 state identifier，让 site 恢复相应状态。
 
 ### 例子
 
@@ -566,11 +566,11 @@ Cookie 既可支撑 personalization/state，也可能成为跨站追踪的标识
 
 ### 解释
 
-课件列举 authorization、shopping carts、recommendations、user session state（Web e-mail）等用途；同时指出 cookies 使 sites 了解许多用户信息，third-party cookies（如 ad network）可跨不同网站跟踪用户。
+课件列举 authorization、shopping carts、recommendations、user session state（Web e-mail）等用途；这些都是 Web application 必须跨 requests 保存 state 的情形。与此同时，cookies 使 sites 了解许多用户信息。third-party persistent cookies（tracking cookies）指网页嵌入的共同第三方（例如 ad network）设下、并在 browser 中持续保存的 cookie：当多个网站都加载该第三方资源时，第三方可在这些网站上看到同一个 cookie value，把不同网站上的访问关联为同一 browser/用户标识，形成 cross-site tracking。这带来隐私问题，因为该第三方能据此推断用户在多个网站的浏览/兴趣行为。
 
 ### 例子
 
-网站 A 与 B 都嵌入同一广告网络资源时，该广告服务器可读取/设置自己的 cookie ID，并将两个站点访问关联起来。
+网站 A 与 B 都嵌入同一广告网络资源时，广告服务器先在访问 A 时设下持久 `cookie ID=8734`；之后访问 B，browser 再向同一广告服务器带上 `ID=8734`。广告服务器于是可将两个站点访问关联为同一标识，即使 A 和 B 并不共享各自的 first-party cookie。
 
 ## Page Load Time（PLT）与 HTTP 性能目标
 
@@ -854,3 +854,502 @@ DNS 出现在 outline/后续章节提示中，未在此 PDF 的后续页面实�
 ### 例子
 
 第 87 页 summary 列出 `Principles of Network Applications`、`HTTP`、`E-mail`，并标示下一主题，而不是给出 DNS protocol 的记录、层次或解析流程。
+
+
+# COMP3331/9331 Week 3 - Application Layer Part 2
+
+> 课件主线：DNS -> P2P（Self Study / NOT ON EXAM）-> Video Streaming & CDN -> MCP -> UDP/TCP Socket Programming。
+>
+> 以下内容依据 Week 3 `Application Layer (DNS, Video Streaming and CDN, MCP, Socket programming)` 课件整理。定义尽量使用规范语言；其余部分用直观语言说明。
+
+---
+
+## 1. DNS（Domain Name System）
+
+### 1.1 DNS 的作用与设计目标
+
+**标准规范定义**
+
+DNS 是由层次化 name servers 实现的分布式数据库，以及供 hosts 与 name servers 进行 name resolution 的应用层协议。它提供 hostname 与 IP address 的映射，也支持别名、邮件服务器别名和负载分配。
+
+**通俗解释**
+
+人会记住 `www.unsw.edu.au`，但 IP datagram 必须送往 IP address。DNS 就像 Internet 的电话簿：把容易记的名字翻译成机器能路由的地址。它虽是 Internet 的核心功能，却放在 application layer：复杂的名字管理留在网络边缘的应用与服务器中，而不是塞进每个 router。
+
+早期 Internet 用集中维护的 `hosts.txt` 保存所有名称和地址；Internet 变大后，维护者扛不住更新量、名字会冲突、每台机器还会保存旧副本。DNS 用分布、分层的方式解决这些问题。
+
+**工作原理 / 使用方法**
+
+应用从 URL 得到 hostname 后，触发 DNS lookup；得到 IP 后才建立后续 HTTP、TCP 等通信。DNS 还可让一个名字对应多个 IP，使请求分散到多台 replicated Web server。
+
+**使用场景 / 为什么使用**
+
+若用一台 central DNS，会出现 single point of failure、巨大的 traffic volume、远距离访问、维护困难和无法扩展的问题。DNS 的目标是：名称唯一、可扩展、分布且可自治管理、高可用、查询快。
+
+**具体例子**
+
+浏览器输入 `www.example.com`，先解析出如 `93.184.216.34`，再对这个地址发起连接；用户不必记住数字地址。
+
+### 1.2 DNS 的三层“Hierarchy”
+
+**标准规范定义**
+
+DNS 同时具有三种互相关联的层次：hierarchical namespace、hierarchical administration，以及 distributed hierarchy of servers。
+
+**通俗解释**
+
+三者不要混淆：namespace 说明名字怎样组成；administration 说明哪一块由谁负责；server hierarchy 说明查询时服务器怎样分工。
+
+**工作原理 / 使用方法**
+
+1. **Hierarchical namespace**：完整域名是从 leaf 到 root 的路径。例如 `instr.eecs.berkeley.edu.` 中，`.edu`、`berkeley`、`eecs`、`instr` 越往左越具体。domain 是树的 subtree，深度可变（课件指出上限为 128）。每个 domain 管自己的子树，因此命名冲突容易避免。
+2. **Hierarchical administration**：zone 是 DNS name space 中由一个 administrative authority 管理的连续部分。一个机构可把子域委派出去，例如 Berkeley 管理 `*.berkeley.edu`，EECS 管理 `*.eecs.berkeley.edu`。
+3. **Server hierarchy**：Root servers 在顶层；TLD servers 负责 `.com`、`.edu`、`.au` 等；authoritative DNS servers 保存某个 domain 的最终 resource records。每台 server 只存总数据库的一小部分，并通过 delegation 找到其他部分的负责者。
+
+**使用场景 / 为什么使用**
+
+全球名字与记录不可能由一个组织、一个数据库统一维护。层次让不同学校、公司、注册机构可以独立更新自己的记录，同时全世界仍能沿树查到答案。
+
+**具体例子**
+
+查询 `gaia.cs.umass.edu` 时，root 知道 `.edu` 在哪里，`.edu` TLD 知道 `umass.edu` 的 authoritative server 在哪里，而该 authoritative server 知道 `gaia.cs.umass.edu` 的地址。
+
+### 1.3 Root、TLD、Authoritative 与 Local DNS
+
+**标准规范定义**
+
+Root name servers 是无法解析名称时的最终联系人；TLD servers 对 top-level domains 负责；authoritative name servers 为其受权 domain 保存 authoritative hostname-to-IP mappings。Local DNS server（default name server）通常由 ISP、公司或学校提供，不严格属于该层次结构。
+
+**通俗解释**
+
+Root 不必知道每个网站 IP，它主要知道“`.edu` 该问谁”；TLD 主要知道“`unsw.edu.au` 或 `umass.edu` 的负责人是谁”；authoritative server 才接近最终答案。你的电脑一般不亲自一层层找，而是先把问题交给 local DNS；它像代理和缓存管理员。
+
+**工作原理 / 使用方法**
+
+主机通过配置协议（如 DHCP）获知 local DNS。应用调用如 `gethostbyname()` 触发查询，local DNS 先查自己的 cache；没有结果就转入 DNS hierarchy。Root 有 13 个 logical root server names，但每个被复制到许多实际位置；所有 DNS server 都知道 root 的位置。
+
+**使用场景 / 为什么使用**
+
+local DNS 减少每台主机的复杂度，并共享缓存。authoritative servers 可由组织自己维护，也可交给 service provider；root/TLD 则提供全局查找入口和委派信息。
+
+**具体例子**
+
+NYU 的主机 `engineering.nyu.edu` 想查 `gaia.cs.umass.edu`，先问 `dns.nyu.edu`，再由后者按缓存或 hierarchy 查找。
+
+### 1.4 Iterative query 与 Recursive query
+
+**标准规范定义**
+
+在 iterative query 中，被询问 server 若不能给出最终结果，会返回下一台应联系的 server；请求方继续查询。在 recursive query 中，被询问 server 承担完成后续 name resolution 并返回最终结果的责任。
+
+**通俗解释**
+
+区别只在“谁继续跑腿”。Iterative 是“我不知道最终答案，但下一站去问它”，请求方接着问；recursive 是“你替我查到底，再把答案给我”。它们不是整个 DNS 系统只能二选一：客户端到 local DNS 常以“请给最终答案”的方式请求，而 local DNS 到 root/TLD/authoritative 往往使用 iterative referrals。
+
+**工作原理 / 使用方法**
+
+对 `gaia.cs.umass.edu`：
+
+```text
+Iterative: local DNS -> Root -> 得到 .edu referral
+           local DNS -> .edu TLD -> 得到 umass.edu referral
+           local DNS -> authoritative -> 得到 IP
+
+Recursive: 请求传给被联系的 server；该 server 继续向下查询，
+           最终答案沿链路返回。
+```
+
+**使用场景 / 为什么使用**
+
+recursive 让最初请求者简单，但若 root/TLD 都为大量请求递归查到底，上层负担会很重。iterative 把继续查询工作留给 resolver，令上层主要做 referral，较易扩展。
+
+**具体例子**
+
+Root 对 iterative request 可回答：“我不知道 `gaia` 的 IP，但请问 `.edu` TLD。”它不需要自己替请求者问完所有后续服务器。
+
+### 1.5 Caching、TTL 与更新
+
+**标准规范定义**
+
+DNS server 一旦学习到 mapping，可将其缓存；cache entry 在 TTL（Time To Live）到期后失效。DNS dynamic update/notify 的相关标准包括 RFC 2136。
+
+**通俗解释**
+
+如果每次查 `google.com` 都从 root 开始，会非常浪费。cache 就是“刚查过，先记住”。TTL 是记录的保鲜期：它避免旧 IP 永远流传，但也意味着更换 IP 后，Internet 各处会在 TTL 尚未到期的一段时间里继续看到旧值。DNS 是 best-effort name-to-address translation，不保证瞬间全网一致。
+
+**工作原理 / 使用方法**
+
+local DNS 特别常缓存 TLD 信息，因此 root 并不常被访问。也可做 negative caching，暂时记住不存在的结果，避免反复查询 `www.cnn.comm`、`www.cnnn.com` 之类拼错的名字。计划换地址时，课件建议：记录旧 TTL -> 先把 TTL 降低（如 30 秒）-> 等待旧 TTL 完成 -> 更新记录 -> 等待传播 -> 把 TTL 恢复。
+
+**使用场景 / 为什么使用**
+
+缓存换来更快响应和更少上游流量；TTL 则在性能与更新速度之间取平衡。临近迁移前临时降低 TTL，可减少用户被旧地址导向错误位置的时间。
+
+**具体例子**
+
+`www.example.com` 从旧服务器迁到新 IP：若旧 TTL 为一天，先等待/降低 TTL，再切换记录；否则有些用户可能一天内仍访问旧机器。
+
+### 1.6 Resource Records（RR）：A、NS、CNAME、MX
+
+**标准规范定义**
+
+DNS distributed database 以 resource record 存储数据，格式为 `(name, value, type, ttl)`。课件重点 record types 为 A、NS、CNAME 和 MX。
+
+**通俗解释**
+
+RR 就是一条有类型的“DNS 事实”。type 告诉你这条记录在回答什么：地址、谁负责一个域、别名真正叫什么，还是邮件该投递给谁。
+
+**工作原理 / 使用方法**
+
+- **A**：`name` 是 hostname，`value` 是 IPv4 address；用于 hostname -> address。
+- **NS**：`name` 是 domain，`value` 是这个 domain 的 authoritative name server hostname；用于 delegation。
+- **CNAME**：`name` 是 alias，`value` 是 canonical（真实）name；得到 canonical name 后通常还要继续查其地址。
+- **MX**：`value` 是与 `name` 关联的 mail server；邮件系统借它决定应将邮件交给哪台服务器。
+
+**使用场景 / 为什么使用**
+
+A 供 Web 等网络连接使用；NS 让层次查询能继续；CNAME 让公开名称与后端机器名称分离；MX 让一个 domain 的 Web 与 mail 服务可分别部署。
+
+**具体例子**
+
+`(www.example.com, 93.184.216.34, A, TTL)`；`(foo.com, dns1.foo.com, NS, TTL)`；`www.ibm.com` 可 CNAME 到 `servereast.backup2.ibm.com`；向 `mahbub@unsw.edu.au` 发送邮件时需要查询 `unsw.edu.au` 的 MX record。
+
+### 1.7 DNS message、插入/更新、可靠性与安全
+
+**标准规范定义**
+
+DNS query 与 reply 使用同一基本 message format：header、questions、answers、authority、additional information。header 含 16-bit identification、flags、各 section 的数量；reply 使用与 query 相同的 identification。DNS 常用 UDP port 53，也支持 TCP。
+
+**通俗解释**
+
+ID 是查询的“单号”，让客户端知道哪个 reply 对应哪个 query；question 写“我要查什么”；answer 放结果；authority 给相关 authoritative server；additional 放有帮助的附加资料。DNS 虽通常跑在 UDP 上，但不能假装 UDP 永不丢包，因此 resolver 自己要超时重试。
+
+**工作原理 / 使用方法**
+
+新建 `networkuptopia.com` 时，向 registrar 注册并提供 primary/secondary authoritative server。registrar 在 `.com` TLD 写入 NS record 和对应 name server 的 A record；组织自己的 authoritative server 再保存 `www.networkuptopia.com` 的 A record 和 domain 的 MX record。为可靠性，DNS servers 采用 primary/secondary replication；至少一个 replica 可用即可服务，查询也能负载分担。UDP 超时后可试 alternate servers；重试同一 server 采用 exponential backoff，且同一 logical query 使用相同 identifier，收到任一 server 的有效回复即可。
+
+**使用场景 / 为什么使用**
+
+这些机制让一个 domain 可以上线、迁移、在部分 server 故障时继续被解析。安全上 DNS 会暴露访问日志，也可能受到审查；cache poisoning 的攻击者会试图把假的 mapping 混入 cache。课件的防护原则是：不要缓存非 authoritative server 提供的 IP mapping。DNSSEC 提供 authentication 与 message integrity。DoT（TLS，port 853）和 DoH（HTTPS/HTTP2，port 443）提高隐私与安全，但课件明确标注 **DoH/DoT NOT ON EXAM**。
+
+**具体例子**
+
+攻击者控制 `drevil.com` 的 DNS 时，不能借回答 `www.drevil.com` 偷塞一条 `google.com -> attacker IP` 而让 resolver 缓存；只应接受 `google.com` authoritative data。
+
+---
+
+## 2. P2P 与 BitTorrent（Self Study / NOT ON EXAM）
+
+### 2.1 P2P architecture 与文件分发
+
+**标准规范定义**
+
+Peer-to-peer architecture 没有 always-on server；任意 end systems（peers）直接通信，既从其他 peers 请求服务，也向其他 peers 提供服务。课件明确标注本节 **Self Study / NOT ON EXAM**。
+
+**通俗解释**
+
+client-server 像所有人都从同一个仓库领文件；P2P 像先领到的人也开始帮忙分发。新 peer 的到来确实增加需求，但也带来 upload capacity，这叫 self scalability。代价是 peers 会上下线、IP 会变，系统管理更复杂。
+
+**工作原理 / 使用方法**
+
+向 N 个 peers 分发大小为 F 的文件时，client-server 至少受 `NF/us` 与最慢下载者 `F/dmin` 限制：`Dcs > max{NF/us, F/dmin}`。P2P 的 server 至少上传一份，所有 peers 的 upload 也加入供应：`Dp2p > max{F/us, F/dmin, NF/(us + sum ui)}`。因此人数增加时 P2P 仍增长，却多出 peer 上传能力来对冲。
+
+**使用场景 / 为什么使用**
+
+适合大量节点共享大文件或分散服务能力的场景，例如 BitTorrent、P2P streaming、VoIP、cryptocurrency；不适合需要简单集中控制的服务。
+
+**具体例子**
+
+1000 人下载同一 ISO：client-server 要由源站发送 1000 份；P2P 中先下载到 chunks 的用户立即上传 chunks 给后来者。
+
+### 2.2 BitTorrent
+
+**标准规范定义**
+
+BitTorrent 是 P2P file-distribution protocol。文件被分成 256 KB chunks；参与同一文件交换的 peers 构成 torrent，tracker 追踪参与 peers。本节同样 **Self Study / NOT ON EXAM**。
+
+**通俗解释**
+
+Alice 加入 torrent 时起初什么都没有。她向 tracker 获取 peers 列表、连接一部分 neighbours；下载的同时也上传。大家各自拥有不同 chunks，整个群体像拼图互换。peer 可能随时加入离开（churn）；下完可离开，也可留下做 seed。
+
+**工作原理 / 使用方法**
+
+Alice 定期向 neighbours 获取它们的 chunk list，再按 **rarest first** 请求自己缺少且最稀少的 chunks，避免某块只在一人手里而消失。发送侧采用 tit-for-tat：Alice 向当前以最高速率向她上传的四个 peers 上传，约每 10 秒重估；约每 30 秒随机 optimistic unchoke 一个 peer，借此发现更好的交换伙伴并让新 peer 有机会开始交换。
+
+**使用场景 / 为什么使用**
+
+rarest first 提升文件完整性与可用性；tit-for-tat 抑制只下载不上传的 free-riding，并奖励贡献 upload 的 peers。
+
+**具体例子**
+
+Bob 被 Alice optimistic unchoke 后，开始高速回传；Bob 进入 Alice 的 top-four，Alice 也进入 Bob 的 top-four，双方获得更快下载速度。
+
+---
+
+## 3. Video Streaming 与 CDN
+
+### 3.1 Video coding、spatial/temporal coding、CBR/VBR
+
+**标准规范定义**
+
+数字视频是以固定速率显示的 image sequence；每张 image 是由 bits 表示的 pixel array。video coding 利用图像内 spatial redundancy 与相邻帧间 temporal redundancy 减少编码所需 bits。CBR（constant bit rate）采用固定 encoding rate；VBR（variable bit rate）随空间/时间编码量变化而改变 rate。
+
+**通俗解释**
+
+若一大片像素都是绿色，不必逐个发送“绿色”，可以说“绿色重复 N 次”——这是空间冗余。下一帧只有球移动时，不必再发送整张背景，只发送变化的部分——这是时间冗余。画面平静时 VBR 花得少；动作、烟花、镜头切换多时 VBR 需要更多 bits。CBR 则像始终按固定速度出货。
+
+**工作原理 / 使用方法**
+
+编码器选择压缩方法和 bit rate。课件示例：MPEG-1 约 1.5 Mbps、MPEG-2 约 3-6 Mbps、MPEG-4 常用于 Internet，约 64 Kbps-12 Mbps。服务端通常保存同一视频的多种 encoded versions，为自适应 streaming 准备。
+
+**使用场景 / 为什么使用**
+
+compression 降低带宽和存储需求。CBR 容易规划资源；VBR 更能把 bits 用在复杂画面上，但瞬时速率会变化，需要 buffering/adaptation 来吸收波动。
+
+**具体例子**
+
+新闻主播静止背景的帧可以只发送很少变化；足球比赛快速移动和切镜头时，VBR 会选择更高 rate 维持画质。
+
+### 3.2 DASH（Dynamic, Adaptive Streaming over HTTP）
+
+**标准规范定义**
+
+DASH 是 Dynamic, Adaptive Streaming over HTTP。server 将视频分成多个 chunks，每个 chunk 保存为多个 encoding rates；manifest file 提供不同 chunks/versions 的 URLs。client 周期性测量 server-to-client bandwidth，逐块请求并选择当前可持续的最高 coding rate。
+
+**通俗解释**
+
+它不是开播前就选定“全程 1080p”。播放器不断看当前网络情况：网络好就取高质量 chunk；网络差就改取低质量 chunk。切换发生在 chunk 边界，观众尽量少看到卡顿。
+
+**工作原理 / 使用方法**
+
+client 读取 manifest -> 测量可用带宽 -> 一次请求一个 chunk -> 依据测量选择最高可持续 rate -> 再次测量并可在之后的 chunks 改变 rate。client 还决定何时请求，避免 buffer starvation（播到没内容）或 overflow；并可选择靠近自己或带宽更好的 URL/server。Streaming video 可概括为：**encoding + DASH + playout buffering**。
+
+**使用场景 / 为什么使用**
+
+用户可能在有线、Wi-Fi、移动网络间切换，带宽差异大。DASH 用普通 HTTP 交付，且在画质与连续播放之间动态平衡。
+
+**具体例子**
+
+地铁中带宽下降时，播放器把下一段从 4 Mbps 版本改为 800 Kbps；出站 Wi-Fi 恢复后，再提高后续 chunk 的质量。
+
+### 3.3 CDN（Content Distribution Network）
+
+**标准规范定义**
+
+CDN 是把内容副本存储并提供于多个地理分布 CDN nodes 的 application-level distribution infrastructure。
+
+**通俗解释**
+
+单一 mega-server 会成为 single point of failure、出口拥塞点，并让远方用户走很长的网络路径；向大量用户重复发送同一视频也无法扩展。CDN 把副本放到用户附近，让用户从合适的副本拿内容。
+
+**工作原理 / 使用方法**
+
+两种课件部署思路：**enter deep**，把大量 CDN servers 放进许多 access networks，离用户很近；**bring home**，把较少数量但更大的 clusters 放在接近 access networks 的 POPs。订阅者请求内容后，可被导向 nearby copy；若路径拥塞，也可以选不同 copy。
+
+**使用场景 / 为什么使用**
+
+适合数百万视频、数十万并发用户的流媒体和大型网站。OTT（over the top）把 Internet host-to-host communication 当服务使用，仍需面对拥塞、选择哪个 node、用户遇拥塞时如何观看、以及内容放置在哪些 nodes 等问题。
+
+**具体例子**
+
+Netflix 将 `Mad Men` 的副本放到多个 CDN nodes；澳洲用户不必每次跨洋访问美国 origin，而从合适的本地/近端 node HTTP streaming。
+
+### 3.4 CDN + DNS 与 Netflix case
+
+**标准规范定义**
+
+CDN provider 的 authoritative DNS 可将每个 CDN object query 映射到合适的 CDN server；这种映射常结合 CNAME、请求者位置或网络路径状态完成。
+
+**通俗解释**
+
+DNS 在这里不只是“域名换 IP”，还是调度入口。用户觉得自己在访问 `netcinema.com`，但该站 DNS 可以返回指向 `KingCDN.com` 的 CNAME；再由 KingCDN 的 authoritative DNS 选择更适合该用户的 CDN node。
+
+**工作原理 / 使用方法**
+
+Bob 从网页取得 `http://netcinema.com/6Y7B23V` -> local DNS 解析 -> netcinema authoritative DNS 返回 KingCDN 的 CNAME -> KingCDN authoritative DNS 选择 CDN server -> Bob 向该 server 用 HTTP 请求视频并获得 stream。
+
+Netflix 案例：视频的 multiple versions 预先上传 CDN servers；Bob 处理 Netflix account/browsing，取得某内容的 manifest file；选择 DASH server/合适 CDN server；streaming 开始。这里 DASH 决定版本，CDN/DNS 帮助决定从哪里取。
+
+**使用场景 / 为什么使用**
+
+它把“内容本身怎么自适应（DASH）”与“内容从哪个地点交付（CDN + DNS）”分开处理，因此能在全球用户、不同网络条件下扩展。
+
+**具体例子**
+
+同一位用户的播放可能从 Sydney CDN node 取高码率 chunk；路径拥塞后 DNS/CDN 或播放器改选其他适合 node，而 DASH 同时把下一 chunk 降码率。
+
+---
+
+## 4. MCP（Model Context Protocol）
+
+### 4.1 MCP、Host/Client/Server 与 RPC
+
+**标准规范定义**
+
+MCP 是开放的 application-layer protocol，用于连接 AI hosts 与 external context/tools，并标准化 messages 与 discovery。它不定义 LLM、UI 或 backend logic。MCP architecture 包括 host、MCP clients 和 MCP servers；host 包含 UI、LLM、orchestration、consent policy，并在 servers 之间实施边界。
+
+RPC（Remote Procedure Call）是让一个 process 调用另一 process 中 procedure 的通信模式。RPC request 含 method、parameters、id；response 返回 result 或 error，并以相同 id 关联。
+
+**通俗解释**
+
+MCP 像 AI 与“文件、天气、数据库、工具”之间统一的插座标准；模型本身不是 MCP 的一部分。host 负责决定能连什么、用户是否同意、模型如何编排；一个 host 可以为不同 server 建多个 client。RPC 则让 `get_weather("Sydney")` 看起来像函数调用，但实际会跨进程/网络，因此可能延迟或没有响应。
+
+**工作原理 / 使用方法**
+
+host 中的 MCP client 与 local-files server、remote-weather server 等分别连接。不要误以为 one call = one packet：网络中的一次 RPC 是 messages 的语义，底层可能被传输协议分段、延迟或失败。
+
+**使用场景 / 为什么使用**
+
+统一 discovery 与 tool/context access 能减少每个 AI application 对每个外部系统各写一套私有接口的成本；host policy 也能集中执行 consent 与权限边界。
+
+**具体例子**
+
+AI host 通过一个 MCP client 读本地文件，通过另一个 client 调 remote weather server；weather server 不替 host 决定用户是否同意调用。
+
+### 4.2 JSON 与 JSON-RPC
+
+**标准规范定义**
+
+JSON 是以文本表示 structured data 的语法：object 用 `{}` 包围，成员为 `"name": value`，name 与 string value 使用双引号；value 可为 numbers、true、false、null、arrays 或 objects。JSON-RPC 定义 request/response rules，而 JSON 仅定义文本语法。
+
+**通俗解释**
+
+JSON 像一张有字段名的文本表单；JSON-RPC 规定怎样把表单说成“调用方法”、怎样带回“结果/错误”。`id` 就是凭证号码：success 或可读的 error 都重复 request 的 id；notification 则没有 id，也不需要 JSON-RPC response。
+
+**工作原理 / 使用方法**
+
+典型请求：
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"get_weather","params":{"city":"Sydney"}}
+```
+
+response 用同一 `id: 7` 返回 `result` 或 `error`。例如订阅通知 `notifications/tools/list_changed` 没有 id。
+
+**使用场景 / 为什么使用**
+
+结构化、可机器处理且易读的 messages 适合 client-server tool calls；id 在多个请求、延迟与错误存在时仍能正确配对。
+
+**具体例子**
+
+`tools/list` 的 request 是 id 7；成功 reply 也带 id 7。若 params 无效，error reply 仍带 id 7 与 error code/message。
+
+### 4.3 MCP state、primitives 与 bindings
+
+**标准规范定义**
+
+课件中的 current MCP 是 stateless：每个 request 提供 protocol version、相关 client capabilities、client information 和 method-specific parameters。`server/discover` 由 server 必须支持，client 可先调用，用于返回 versions、capabilities 和通常的 self-reported identity。MCP 的三种 primitives 为 prompts、resources、tools。
+
+**通俗解释**
+
+stateless 表示 server 不应只依赖“你上一句话说过什么”；每次请求要带足够的协商资料。三种 primitive 可记成：prompts 是可重用的提问模板，resources 是只读资料，tools 是能执行动作的函数。host policy 决定 model 是否能选择/调用 tool，不是 tool 自己越权决定。
+
+**工作原理 / 使用方法**
+
+- **Prompts**：user-controlled reusable message templates；`prompts/list`、`prompts/get`。
+- **Resources**：以 URI 标识的 read-only contextual data；`resources/list`、`resources/read`。
+- **Tools**：executable functions；`tools/list`、`tools/call`。
+
+两种标准 binding 具有相同 methods/semantics：
+
+- **stdio（local）**：host launch subprocess；client/server messages 是 newline-delimited UTF-8 JSON-RPC，经 stdin/stdout；logs 写 stderr；可用 `notifications/cancelled` 取消。
+- **Streamable HTTP（typically remote）**：一个 MCP endpoint；每个 client message 是 HTTP POST；request 收 JSON 或 request-scoped SSE（Server-Sent Events）；关闭 SSE response stream 可取消。
+
+**使用场景 / 为什么使用**
+
+stdio 适合本机随 host 启动的 server，例如 local files；Streamable HTTP 适合远程服务，例如 weather。统一 binding 语义让同一个 tools/list / tools/call 逻辑不因部署地点而改变。
+
+**具体例子**
+
+HTTP MCP flow：client `server/discover`（id 1）取得 versions/capabilities -> `tools/list`（id 2）得到 `get_weather` 与 JSON Schema -> host 内 LLM 选择工具 -> `tools/call get_weather`（id 3）-> server 以 id 3 返回结果。每个 client request 使用独立 HTTP POST；这绝不意味着“一次 MCP request 恰好是一个 IP packet”。
+
+---
+
+## 5. Socket 与 UDP/TCP Socket Programming
+
+### 5.1 Socket 的概念
+
+**标准规范定义**
+
+Socket 是 application process 与 end-to-end transport protocol 之间的 interface（“door”）。application developer 控制 application 与 socket 的使用，OS 控制 transport、network、link、physical layers。
+
+**通俗解释**
+
+两个应用不能直接把数据塞进网络；它们把数据交给 socket，OS 再用 TCP 或 UDP 运送。socket 不是整个网络，而是程序通向 transport service 的门。
+
+**工作原理 / 使用方法**
+
+client 与 server 创建 sockets；server 在约定 port 等待，client 指定 server IP 与 port。具体的 send/receive、connection、reliability 行为取决于选 TCP 或 UDP。
+
+**使用场景 / 为什么使用**
+
+socket programming 是构建 client/server applications 的基础。它把应用逻辑与 OS 提供的传输能力分开。
+
+**具体例子**
+
+天气 client 向 server 的 port 发送请求；server 从 socket 收到 bytes、处理后经 socket 回应。
+
+### 5.2 UDP socket programming
+
+**标准规范定义**
+
+UDP 是 connectionless transport：发送前没有 handshake。sender 为每个 packet 显式附带 destination IP address 和 port number；receiver 从收到的 packet 取出 sender IP 与 port。UDP 提供不可靠的、以 segments 为单位的 bytes transfer，数据可能丢失或乱序。
+
+**通俗解释**
+
+UDP 像寄明信片：每封都写收件地址，不先建立专属通道；寄出后不保证一定到、也不保证先寄的先到。优点是简单、开销小、可立即发送。
+
+**工作原理 / 使用方法**
+
+UDP client pseudocode：create socket -> loop（send UDP segment 到已知 server IP/port；receive response）-> close。UDP server：create socket -> bind 到特定 port -> loop（receive client X segment；从 message 取得 client IP/port；send reply 给 client X）-> close。
+
+**使用场景 / 为什么使用**
+
+适用于应用可以接受/自行处理丢失、乱序，且希望避免 connection setup 的情形；若应用需要可靠性，必须在 UDP 之上自行实现 timeout、sequence number、retransmission 等逻辑。
+
+**具体例子**
+
+Ping-style UDP client 给 server 发含 sequence number 的 datagram，等待一段时间；没收到 reply 就记录 timeout，而不是假设 OS 会自动重传。
+
+### 5.3 TCP socket programming
+
+**标准规范定义**
+
+TCP 是 connection-oriented transport。client 创建 socket 并指定 server IP/port，TCP 建立 connection；从 application viewpoint，TCP 在 client 与 server 间提供 reliable、in-order byte-stream transfer。server 对每个被接受的 client connection 创建新的 connection socket。
+
+**通俗解释**
+
+TCP 像先接通电话再持续说话：先建立关系，再按顺序可靠地传输 bytes。server 有一个 welcoming socket 专门接客；每接到一个 client，创建一个 connection socket 专门和该 client 通话，因此能同时服务多个 clients。source port numbers 帮助区分 clients。
+
+**工作原理 / 使用方法**
+
+TCP client：create `ConnectionSocket` -> active connect（指定 server IP/port）-> 在 `ConnectionSocket` read/write -> close。TCP server：create `WelcomingSocket` -> bind 特定 port -> listen/register willingness -> loop（accept new connection 得到 `ConnectionSocket`；read/write；close connection socket）-> 最后 close welcoming socket。
+
+**使用场景 / 为什么使用**
+
+适合需要完整、有序 byte stream 的应用，例如多数 Web、登录、文件传输与 request/response service。相较 UDP，TCP 增加 connection setup 与 transport-layer reliability 的机制。
+
+**具体例子**
+
+Web client 连到 server 的 443 port；server 的 welcoming socket `accept()` 后为该 client 创建独立 connection socket，HTTP bytes 可可靠、有序地在此连接中读写。
+
+---
+
+## Week 3 总结链路
+
+```text
+用户输入 hostname
+  -> DNS hierarchy / local DNS / cache 解析名字
+  -> CNAME + CDN authoritative DNS 选择适合的 content node
+  -> CDN 用 HTTP 交付视频
+  -> DASH 逐 chunk 依带宽选择 encoding rate
+
+AI host 要访问外部 context/tools
+  -> MCP client/server
+  -> JSON-RPC messages over stdio or Streamable HTTP
+
+应用要直接通信
+  -> socket
+  -> 需要可靠有序 stream 时用 TCP；可接受不可靠 datagram 时用 UDP
+```
+
