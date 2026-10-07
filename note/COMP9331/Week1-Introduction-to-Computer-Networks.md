@@ -1353,3 +1353,493 @@ AI host 要访问外部 context/tools
   -> 需要可靠有序 stream 时用 TCP；可接受不可靠 datagram 时用 UDP
 ```
 
+
+---
+
+# Week 4 - Transport Layer Part 1
+
+> **课程：** COMP3331 / COMP9331 Computer Networks and Applications  
+> **Reading Guide：** Chapter 3, Sections 3.1-3.5.2  
+> **Major Concepts：** Multiplexing-demultiplexing、Checksum、Reliable data transfer
+
+## 本讲路线与提醒
+
+本讲从 transport-layer services 出发，依次讨论 multiplexing/demultiplexing、connectionless transport (UDP)、reliable data transfer 的基本原理，最后开始介绍 connection-oriented transport (TCP)。后续才会深入 flow control、congestion control 和 TCP 的连接管理。
+
+> **老师明确说明：** 教材会用 finite state machines（FSM）描述 rdt 的 sender/receiver；**本课不使用 FSM，考试也不会考 FSM 题目**。理解事件、状态变化与动作的逻辑即可。
+
+---
+
+## 1. Transport-layer services
+
+### 1.1 端到端的逻辑进程通信
+
+**① Definition（定义）**  
+Transport layer protocols provide **logical communication between application processes running on different hosts**。Internet 可供应用使用的两种 transport protocol 是 **TCP** 和 **UDP**。
+
+**② 通俗解释**  
+network layer 的工作是把资料大致从一台主机送到另一台主机：可把它看成给 transport layer 的 `sendtohost(data, host)` 服务。它通常采用 best-effort delivery，不承诺可靠送达、固定路径，也不替应用协调发送速率。transport layer 在两端主机（通常在 OS kernel）运行，在这个不完美的基础上，为**两个应用进程**建立像直接沟通一样的抽象。
+
+不要把「logical」误解成一条真实的专线：数据仍经过很多 router 和 network link；只是两端的应用感觉自己在端到端交换资料。
+
+**③ How it works（发送端与接收端）**
+
+```text
+发送进程的 application message
+    -> transport：决定 header fields、加 transport header、形成 segment
+    -> IP / network layer
+    -> 网络（best effort）
+    -> 接收端 IP
+    -> transport：检查 header、取出 message、按 socket demultiplex
+    -> 正确的接收进程
+```
+
+- Sender：将 application message 切分/封装为 segments，交给 network layer。
+- Receiver：从 IP 收到 segment，检查 header，重组或抽取 application message，经 socket 向上交付。
+
+**④ 为什么需要**  
+一台 host 可同时运行 browser、DNS、游戏、server 等很多 process。IP 只到 host；transport layer 必须进一步把资料送到正确 process，并按协议提供可靠性、顺序、流量/拥塞控制等能力。
+
+### 1.2 TCP 与 UDP
+
+| Protocol | PPT 所列服务 | 直观理解 |
+|---|---|---|
+| **TCP** | reliable, in-order delivery；congestion control；flow control；connection setup | 先建立 connection，再提供可靠、有序的 byte stream |
+| **UDP** | unreliable, unordered delivery；no-frills extension of best-effort IP | 不握手，每个 datagram 独立处理，尽快交给网络 |
+
+两者都**不提供** delay guarantee 或 bandwidth guarantee；例如「使用 TCP」不等于一定低延迟或一定有多少带宽。
+
+---
+
+## 2. Multiplexing and demultiplexing
+
+### 2.1 核心概念
+
+**① Definition（定义）**  
+**Multiplexing** at a sender handles data from multiple sockets and adds a transport header. **Demultiplexing** at a receiver uses header information to deliver received segments to the correct socket。
+
+**② 通俗解释**  
+网络是共享资源，它不认识 browser、DNS 或 socket。发送端要把多个应用的资料合流到 IP；接收端则要根据「信封」上的地址和 port，把到达同一台 host 的资料分给正确应用。port 就是 host 内的进程入口编号。
+
+**③ How it works**
+
+```text
+P1 socket --\
+P2 socket ----> sender multiplexing -> [IP + TCP/UDP header + payload] -> IP
+P3 socket --/
+
+IP datagram 到达 host
+    -> receiver reads source/destination IP and ports
+    -> demultiplexing
+    -> matching socket -> correct process
+```
+
+一个 TCP/UDP segment 都有 source port 与 destination port；IP datagram 还带 source/destination IP address。header 的值就是 demux 的依据。
+
+**④ 使用场景**  
+浏览器和 DNS client 可以同时使用网络而不混线；一台 web server 也能同时为大量 clients 服务。
+
+### 2.2 UDP connectionless demultiplexing
+
+**① Definition（定义）**  
+UDP socket 的接收 demultiplexing 使用 **destination IP address 与 destination port number**；实际课堂总结为 destination IP/port（port 是关键 socket 标识）。具有相同 destination port、但 source IP/port 不同的 UDP datagrams，会被导向**同一个**接收 socket。
+
+**③ How it works**  
+创建 socket 时，应用指定本地 port，或让 OS 随机选择可用 port：
+
+```java
+DatagramSocket serverSocket = new DatagramSocket(6428);
+```
+
+发送 UDP datagram 时，应用必须指定 destination IP address 与 destination port。server 收到后只看目的端这一侧来选 socket；它不会因为来自不同 client 而自动各建一个 connected socket。
+
+**⑤ 具体例子与 Quiz**  
+若 100 个 client 同时以 UDP 向 server 的 port 6428 通信，每个 client 有一个 socket，server 只需一个绑定 6428 的 UDP socket。因此答案是 **1, 1（server, each client）**。
+
+### 2.3 TCP connection-oriented demultiplexing 与 TCP sockets
+
+**① Definition（定义）**  
+A TCP socket is identified by a **4-tuple**：
+
+```text
+(source IP address, source port number, destination IP address, destination port number)
+```
+
+receiver 用四个值将 segment 导向对应 socket。
+
+**② 通俗解释**  
+同一个 server 的 port 80 可以同时服务很多 clients。目的 port 都是 80 并不冲突，因为每个 client 的 source IP/port 不同，形成不同 4-tuple，因而映射到不同 connection socket。
+
+**③ How it works：welcoming socket 与 connection socket**
+
+```text
+server process
+  welcoming socket (port X)
+       <- TCP handshake from client 1 -> connection socket 1 (port X)
+       <- TCP handshake from client 2 -> connection socket 2 (port X)
+```
+
+server 的 welcoming socket 等待 connection request；每个已建立 TCP connection 有自己的 socket，所有这些 server-side sockets 可使用相同的 server port X，但 4-tuple 不同。
+
+**⑤ Quiz 答案**
+
+- 100 个 client 同时连 traditional HTTP/TCP web server：active sockets 是 **101, 1**（server 有 1 welcoming socket + 100 connection sockets；每个 client 1 个）。
+- server 的 TCP sockets 是否有同一个 server-side port number？**Yes**。它们依然由完整 4-tuple 区分。
+
+> **补充理解：port scanning。** PPT 提醒 server 在 open ports 等待请求；攻击者可能用 Nmap、Superscan 等扫描 open/closed/unreachable ports，再针对已知服务漏洞攻击。小于 1024 的 ports 保留给 well-known apps；例子有 MS SQL server UDP 1434、NFS TCP/UDP 2049，以及 Slammer worm 利用 SQL Server buffer overflow。此处重点是理解「开放 port 会暴露服务」，不是扫描技巧。
+
+---
+
+## 3. Connectionless transport: UDP
+
+### 3.1 UDP 的特性与适用情形
+
+**① Definition（定义）**  
+UDP (User Datagram Protocol, RFC 768) is a connectionless, best-effort, bare-bones Internet transport protocol. UDP sender 和 receiver 之间没有 handshaking；each UDP segment is handled independently。
+
+**② 通俗解释**  
+UDP 很像把一张张明信片直接投入邮筒：不先建 connection、没有顺序保证、可能丢失。它的价值不是「更可靠」，而是简单、没有 setup RTT、没有连接状态，而且没有 congestion control，所以应用可按自己希望的速度发送（即使网络拥塞，仍可运作）。
+
+**③ Header 与动作**
+
+```text
+0                 15 16                31
++-------------------+-------------------+
+| source port        | destination port  |
++-------------------+-------------------+
+| length             | checksum          |
++-------------------+-------------------+
+| application data (payload, variable)  |
++---------------------------------------+
+```
+
+- `length`：整个 UDP segment（header + data）的 bytes 数。
+- Sender：收 application message -> 决定 UDP header fields -> 创建 UDP segment -> 交给 IP。
+- Receiver：从 IP 收 segment -> 检查 UDP checksum -> demultiplex 到 socket -> 交付应用。
+
+**④ 使用场景**  
+PPT 列出 streaming multimedia（容忍 loss、对 rate 敏感）、DNS、SNMP、HTTP/3；也常见于 latency-sensitive/time-critical 的 DNS、DHCP、SNMP、RIP routing updates、voice/video chat 与 FPS gaming。对这些应用，迟到的旧资料有时比丢掉资料更没用。
+
+若 application 仍要 reliability，例如 HTTP/3，必须在 **application layer** 增加所需 reliability 与 congestion control，而不是 UDP 本身提供。
+
+### 3.2 Internet checksum
+
+**① Definition（定义）**  
+UDP checksum is used to detect errors such as flipped bits in a transmitted segment. Sender 将 UDP segment 内容（UDP header fields、data，以及相关 IP addresses）视作一串 16-bit integers，作 **one's-complement sum**，并将 checksum 写入 UDP checksum field；receiver 重算并比对。
+
+**③ How it works：one's complement 与 wraparound**
+
+1. 将内容按 16-bit words 切分。
+2. 逐个做 one’s-complement addition。
+3. 若最高位有 carry-out，将该 carry **wrap around** 加回低 16 bits。
+4. 对最终 sum 逐位取反，得到 checksum。
+5. receiver 以同样方法计算：不相等则检测到 error；相等表示未检测到 error。
+
+**④ 局限**  
+checksum 是**弱保护**，不是「相等就绝对没有错」。某些不同 bit flips 的变化可使和不变，因而 checksum 不变；所以 equal 只表示没有侦测到错误。
+
+**Pseudo-header（PPT 的实践说明）**  
+实际 UDP checksum 是 IP pseudo-header（从 IP header 取出的部分信息）+ UDP header + data 的 one’s-complement sum 的 16-bit one’s complement；若长度为奇数 bytes，末尾补 zero 使其为 two octets 的倍数。虽然 checksum field 本身在 header 内，计算时会按定义处理该字段；本质仍是让 receiver 能验证完整结果。TCP checksum 的计算方式相似。
+
+---
+
+## 4. Principles of reliable data transfer (rdt)
+
+### 4.1 Reliable service abstraction 与接口
+
+**① Definition（定义）**  
+Reliable data transfer service abstraction：application 看见的是 sending process 与 receiving process 之间的 reliable channel；实际上 transport 的 sender-side 与 receiver-side rdt protocol 在一个可能 unreliable 的 network channel 之上实现此服务。
+
+**② 通俗解释**  
+上层只想「资料一定正确按序到达」，但下层可能 corrupt、lose 或 reorder packets。rdt 就是两端 transport protocol 合作，把坏网络包装成可靠通道。复杂度强烈取决于 channel 可能发生哪些问题。
+
+sender/receiver 并不知道对方当前状态，例如 sender 不会天然知道 packet 有没有收到；除非对方用 message 告诉它。因此可靠性必须依赖 feedback。
+
+**③ rdt interfaces**
+
+```text
+Application -> rdt_send(data) -> sender rdt -> udt_send(packet) -> unreliable channel
+unreliable channel -> rdt_rcv(packet) -> receiver rdt -> deliver_data(data) -> Application
+```
+
+- `rdt_send(data)`：上层 application 调用，交付要送到对方上层的数据。
+- `udt_send(packet)`：rdt 调用，把 packet 投入 unreliable channel。
+- `rdt_rcv(packet)`：packet 到 receiver 时被调用。
+- `deliver_data(data)`：rdt 向上层交付正确资料。
+
+课堂为了循序建立 protocol，先考虑**单向 data transfer**；但 ACK 等 control information 仍会反向流动。
+
+### 4.2 rdt1.0：底层完全可靠
+
+**① Definition（定义）**  
+rdt1.0 assumes a perfectly reliable underlying channel: no bit errors and no packet loss。
+
+**② 通俗解释 / How it works**  
+没有错误也不丢失，sender 送 data，receiver 收到并 deliver；没有任何额外工作。这是后面每增加一种网络问题时的基线。
+
+### 4.3 rdt2.0：只有 bit errors
+
+**① Definition（定义）**  
+rdt2.0 assumes packets may have bit errors. It uses checksum for error detection, receiver feedback via ACK/NAK, retransmission, and stop-and-wait。
+
+**③ How it works**
+
+```text
+sender sends one packet -> waits
+receiver: checksum OK  -> ACK -> sender sends next packet
+receiver: checksum bad -> NAK -> sender retransmits current packet
+```
+
+- **ACK (acknowledgement)**：receiver 明确说 packet 收得正确。
+- **NAK (negative acknowledgement)**：receiver 说 packet 有错误。
+- **stop-and-wait**：一次只送一个 packet，必须等 receiver response 后才能继续。
+
+### 4.4 rdt2.0 的 fatal flaw 与 rdt2.1
+
+**致命问题**  
+如果 ACK 或 NAK 本身 corrupted，sender 不知道 receiver 到底收到什么。直接重传可能造成 receiver 已经交付过的 data 再交付一次（duplicate）。
+
+**① rdt2.1 Definition（定义）**  
+rdt2.1 extends rdt2.0 with **sequence numbers**、checksums for ACK/NAK、duplicate detection。两个 sequence numbers（0 和 1）已足够。
+
+**② 为什么 0/1 足够**  
+stop-and-wait 同时最多只有一个未确认 packet。receiver 只需知道「下一次期待 0 还是 1」；sender 每成功送一个便交替编号。若 control message 损坏，sender 重传当前编号；receiver 若看到不是期待编号的重复 packet，会 discard 而不 deliver up，并回复 ACK。
+
+```text
+send data(0) -> ACK(0) -> send data(1) -> ACK(1)
+                         ^ ACK/NAK 损坏时重传 data(1)
+receiver 收到重复 data(1) -> discard, re-ACK(1)
+```
+
+注意：receiver 不知道自己的上一份 ACK/NAK 有没有成功到 sender，因此也需要借 sequence number 判断重复。
+
+### 4.5 rdt2.2：NAK-free
+
+**① Definition（定义）**  
+rdt2.2 has the same functionality as rdt2.1 but uses only ACKs. Instead of NAK, receiver ACKs the last correctly received packet and explicitly includes the acknowledged sequence number。
+
+**③ How it works**  
+若 sender 正期待 `ACK(1)`，却收到重复 `ACK(0)`，这等价于「当前 packet 没有被正确接收」的信号，sender retransmits current packet。PPT 指出 TCP 采用这种 **NAK-free** 思路。
+
+### 4.6 rdt3.0：errors 加 loss
+
+**① Definition（定义）**  
+rdt3.0 handles a channel that can corrupt or lose data packets and ACKs, using checksums, sequence numbers, ACKs, retransmission and a countdown timer.
+
+**② 通俗解释**  
+若 packet 或 ACK 根本丢了，sender 会永远等不到回复；光有 checksum/ACK/sequence number 不够。它必须等待「合理时间」，没有 ACK 就假定 loss 并重传。
+
+**③ How it works**
+
+```text
+sender sends pkt n and starts timer
+  -> ACK(n) before timeout: stop timer; send next packet
+  -> timeout: retransmit pkt n; restart timer
+
+receiver gets new pkt n: deliver once; send ACK(n)
+receiver gets duplicate pkt n: do not deliver again; send ACK(n) again
+```
+
+- **packet loss**：timeout 后重传；随后依序恢复。
+- **ACK loss**：sender timeout 后重传；receiver 识别 duplicate，重发 ACK，不重复交付 data。
+- **delayed ACK / premature timeout**：ACK 可能只是迟到，sender 已重传。sequence number 让 receiver 安全丢弃重复 packet；迟到/重复 ACK 可被忽略。PPT 说明 rdt3.0 **不因 duplicate ACK 而重传**，它依 timeout 重传。
+
+### 4.7 RDT Quiz 要点
+
+1. 仅有 packet corruption、没有 loss/reordering，要可靠传输的最少机制是 **checksums, ACKs, NAKs, sequence numbers**（答案 e）。ACK/NAK 也可能 corrupt，故须用 sequence number 安全重传。  
+2. 若 packets（包括 ACK/NAK）可能 loss，rdt2.1/2.2 会**get stuck**（答案 b）：它们没有 timeout。  
+3. 若要同时处理 corruption 与 loss，最少是 **checksums, ACKs, timeouts, sequence numbers**（答案 d）。NAK 非必要，因为可采用 rdt2.2 的 duplicate ACK 方法。
+
+---
+
+## 5. Stop-and-wait 的性能与 pipelining
+
+### 5.1 Stop-and-wait utilization
+
+**① Definition（定义）**  
+Sender utilization (U_{sender}) 是 sender 忙于将 packet transmission 到 channel 的时间比例。对 stop-and-wait：
+
+```text
+U_sender = (L / R) / (RTT + L / R)
+```
+
+其中 `L` 是 packet bits，`R` 是 link rate。
+
+**② 通俗解释 / 例子**  
+PPT 例子：1 Gbps link、15 ms propagation delay、8000-bit packet。
+
+```text
+L/R = 8000 / 10^9 = 8 microseconds
+U_sender = 0.008 / (30 + 0.008) ≈ 0.00027
+```
+
+也就是说 sender 绝大部分时间在等 ACK，协议反而限制了很快的基础设施；rdt3.0 虽可靠，性能很差。
+
+### 5.2 Pipelining
+
+**① Definition（定义）**  
+Pipelining allows the sender to have multiple in-flight, not-yet-acknowledged packets.
+
+**② 通俗解释**  
+不要寄出一封信后才写下一封；连续送多个 packet，再逐个收 ACK。这样 link 在 RTT 期间仍有资料在飞。三-packet pipeline 会使 utilization 约提高三倍。
+
+**③ 需要的新机制**  
+sequence number range 要扩大，sender 和/或 receiver 要 buffering。两种代表性 sliding-window protocol 是 **Go-Back-N (GBN)** 与 **Selective Repeat (SR)**。
+
+---
+
+## 6. Go-Back-N (GBN)
+
+**① Definition（定义）**  
+GBN sender maintains a window of up to `N` consecutive transmitted but unACKed packets, with k-bit sequence numbers. It uses **cumulative ACKs**: `ACK(n)` acknowledges all packets up to and including sequence number `n`。
+
+**③ Sender 行为**
+
+- 收到 `ACK(n)`：window 前移，使其从 `n+1` 开始。
+- 只对 oldest in-flight packet 维护一个 timer。
+- `timeout(n)`：重传 packet `n` 及 window 内所有序号更高的 packets，即「go back」并重送。
+
+**④ Receiver 行为**  
+receiver 只需记住 `rcv_base`（最高的 in-order packet）。它总 ACK 到目前为止最高的正确、按序 packet，因而可能产生 duplicate ACK。若收到 out-of-order packet，可选择 discard 或 buffer（implementation decision），但会 re-ACK 最近的 highest in-order sequence number。
+
+**⑤ 具体例子**  
+N=4，packet 2 丢失而 packet 3、4、5 到达：receiver 因尚在等 2，不能向上按序 deliver 3/4/5，于是反复发 `ACK(1)`。sender 对 packet 2 timeout 后，重传 2、3、4、5；这简单但会重传其实已到达的 packets。
+
+---
+
+## 7. Selective Repeat (SR)
+
+**① Definition（定义）**  
+Selective Repeat individually acknowledges correctly received packets, buffers out-of-order packets for eventual in-order delivery, and retransmits only individually timed-out unACKed packets.
+
+**② 通俗解释**  
+与 GBN「一个丢了，后面全重送」相比，SR 会记住后面已经抵达的 packets，只补丢的那一个，因此通常更有效，但 sender/receiver 的状态和实现复杂得多。
+
+**③ Sender/receiver 行为**
+
+```text
+Sender:
+  if next seq in send window: send packet
+  timeout(n): resend packet n; restart n's timer
+  ACK(n): mark n received; if n is sendbase, advance past contiguous ACKed packets
+
+Receiver:
+  n in receive window: ACK(n); out-of-order packets buffer
+  n is in-order: deliver it and all now-contiguous buffered packets; advance rcvbase
+  n in previous window: re-ACK(n)
+  otherwise: ignore
+```
+
+sender 为每个 unACKed packet 维护 timer；receiver 分别 ACK 每个正确 packet，而不是 cumulative ACK。
+
+### 7.1 SR 的 sequence-number-space 约束
+
+**① Definition（定义）**  
+To avoid ambiguity after sequence-number wraparound, **sender window size must be at most one half of the sequence number space**：
+
+```text
+W_sender <= (sequence number space) / 2
+```
+
+**② 为什么需要**  
+若 sequence numbers 为 0,1,2,3（空间大小 4），window size 却是 3，旧的 retransmitted `pkt0` 可能在 receiver window 已绕回且正接受新 `pkt0` 时到达。receiver 无法观察 sender 的历史，看到的行为相同，不能判断它是旧 duplicate 还是新 data，可能错误 deliver。窗口至多占序号空间一半才能避免 sender/receiver window 的这种歧义重叠。
+
+---
+
+## 8. GBN vs SR 与 reliability recap
+
+| 维度 | GBN | SR |
+|---|---|---|
+| ACK | cumulative ACK | individual/selective ACK |
+| receiver 的 out-of-order packet | 可 discard 或 buffer；仍 ACK highest in-order | buffer，并分别 ACK |
+| timer | oldest outstanding packet 一个 | 每个 unACKed packet 一个 |
+| timeout 后 | 重传 n 及所有更高的未确认 packet | 仅重传 timeout 的 n |
+| 代价 | 简单但丢一个会浪费重传 | 效率高但状态、buffer、序号约束更复杂 |
+
+**Quiz：**
+
+- 「GBN maintains a separate timer for each outstanding packet」不正确（答案 c）；SR 才是每个 outstanding packet 一个 timer。
+- receiver 已正确收到至 24，随后收到 27、28：GBN 仍期待 25，因此两次回复 `ACK(24), ACK(24)`；SR 会分别回复 `ACK(27), ACK(28)`。答案 **b**。
+
+**可靠传输解法总览**
+
+- **Checksums**：detect errors。
+- **Timers**：detect loss。
+- **Acknowledgments**：可 cumulative 或 selective。
+- **Sequence numbers**：识别 duplicates，支持 windows。
+- **Sliding windows**：提高效率。
+
+可靠协议正是综合这些机制，决定何时 retransmit、何时 acknowledge。之后 TCP 会回答：怎样追踪 outstanding pipelined segments、pipeline 多少、怎样选 sequence numbers、connection setup/teardown 长什么样、timeout 怎样选择。
+
+---
+
+## 9. TCP overview 与 TCP segment structure
+
+### 9.1 TCP overview
+
+**① Definition（定义）**  
+TCP is a connection-oriented, point-to-point, full-duplex, reliable in-order byte-stream transport protocol. Relevant RFCs listed in PPT include 793, 1122, 2018, 5681, 7323.
+
+**② 关键性质**
+
+- **connection-oriented**：data exchange 前 handshaking、交换 control messages，初始化双方 state。
+- **reliable, in-order byte stream**：可靠且按序交付的是 bytes；**没有 message boundaries**。
+- **full duplex**：同一 connection 可同时双向 data flow。
+- **point-to-point**：一个 sender 对一个 receiver。
+- **pipelining**：TCP congestion control 和 flow control 一起设置 window size。
+- **flow controlled**：sender 不会 overwhelm receiver。
+- **MSS (maximum segment size)**：maximum segment size。
+
+TCP 从前面的 rdt 思想吸收 cumulative ACK、pipelining、sequence number、timer 等机制，并在真实 Internet 中结合 flow/congestion control。
+
+### 9.2 TCP segment structure
+
+```text
++--------------------+--------------------+
+| source port         | destination port   |
++--------------------+--------------------+
+| sequence number                          |
++------------------------------------------+
+| acknowledgement number                   |
++----+---+----------------+----------------+
+|hlen|...| flags          | receive window |
++-------------------------+----------------+
+| checksum                | urgent pointer |
++-------------------------+----------------+
+| options (variable)                       |
++------------------------------------------+
+| application data (variable length)       |
++------------------------------------------+
+```
+
+- **sequence number**：计算的是 byte stream 中的 bytes，不是 segment number。
+- **acknowledgement number**：ACK 表示的下一个 expected byte 的 sequence number；`A` bit 表示这是 ACK。
+- **receive window**：flow control；receiver 愿意接收的 bytes 数。
+- **header length (`hlen`)**：TCP header 的长度；`options` 可变长。
+- **checksum**：Internet checksum。
+- **RST, SYN, FIN**：connection management。
+- **C, E**：congestion notification；其他 flags 包括 `U, A, P, R, S, F`。
+- **application data**：application 写入 TCP socket 的可变长度资料。
+
+---
+
+## Week 4 Part 1 总结链路
+
+```text
+多个 application sockets
+  -> multiplexing：加 TCP/UDP header
+  -> IP best-effort network
+  -> demultiplexing：按 UDP destination IP/port 或 TCP 4-tuple 找 socket
+
+若用 UDP：无连接、低开销、checksum 只做 error detection
+
+若要可靠传输：checksum + ACK + sequence number + timer + retransmission
+  -> stop-and-wait 正确但低利用率
+  -> pipelining / sliding window
+       -> GBN：cumulative ACK，丢包后回退重传
+       -> SR：selective ACK，只重传丢失 packet，但窗口需 <= 序号空间一半
+
+TCP：把这些可靠传输思想用于 connection-oriented、可靠有序 byte stream，
+并加入 flow control 与 congestion control（后续内容）。
+```
+
